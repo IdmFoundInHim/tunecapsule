@@ -1,5 +1,5 @@
 -e git+https://github.com/IdmFoundInHim/streamsort/#egg=streamsort
 -e .
--e git+https://github.com/python/mypy/#egg=mypy
--e git+https://github.com/PyCQA/astroid#egg=astroid
--e git+https://github.com/PyCQA/pylint/#egg=pylint
+black
+pre-commit
+build

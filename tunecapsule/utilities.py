@@ -44,5 +44,6 @@ DB_COLUMNS = {
 def read_rows(rows: Collection[tuple], columns: str) -> tuple:
     parsers = [DB_COLUMNS[name.strip()] for name in columns.split(",")]
     return [
-        tuple(parser(column) for column, parser in zip(row, parsers)) for row in rows
+        tuple(parser(column) for column, parser in zip(row, parsers))
+        for row in rows
     ]

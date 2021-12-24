@@ -28,7 +28,12 @@ from streamsort import (
 )
 from streamsort.types import Mob, Query, State
 
-from ._constants import DB_LOCATION, RANKINGS, SHA256_ENCODING, SPOTIFY_DATE_DELIMITER
+from ._constants import (
+    DB_LOCATION,
+    RANKINGS,
+    SHA256_ENCODING,
+    SPOTIFY_DATE_DELIMITER,
+)
 from .utilities import list2strray, read_rows
 
 
@@ -51,7 +56,9 @@ def tc_classify(subject: State, query: Query) -> State:
     of each project based on its state in Spotify at runtime and a
     dynamic representation of each project by Spotify URIs.
     """
-    for proj in cast(list[Mob], proj_projects(subject, subject.mob).mob["objects"]):
+    for proj in cast(
+        list[Mob], proj_projects(subject, subject.mob).mob["objects"]
+    ):
         try:
             classification = query.split()[0].upper()
         except TypeError as err:
@@ -59,9 +66,13 @@ def tc_classify(subject: State, query: Query) -> State:
         if classification.isnumeric():
             raise UnsupportedQueryError("Classification cannot be numeric")
         with sql.connect(DB_LOCATION) as database:
-            row = _tc_classify_build_row(subject.api, database, classification, proj)
+            row = _tc_classify_build_row(
+                subject.api, database, classification, proj
+            )
             if classification in RANKINGS:
-                database.execute("DELETE FROM ranking WHERE sha256 = ?", (row[0],))
+                database.execute(
+                    "DELETE FROM ranking WHERE sha256 = ?", (row[0],)
+                )
                 target_table = "ranking"
                 # TODO Add processing of singles
             else:
@@ -74,7 +85,9 @@ def tc_classify(subject: State, query: Query) -> State:
                     # TODO Warn about duplicate
                     return subject
                 target_table = "certification"
-            database.execute(f"INSERT INTO {target_table} VALUES ({'?, ' * 10}?)", row)
+            database.execute(
+                f"INSERT INTO {target_table} VALUES ({'?, ' * 10}?)", row
+            )
     return subject
 
 
@@ -86,7 +99,7 @@ def tc_season(subject: State, query: Query) -> State:
     The query describes a time range and certification. An optional
     first word, "update", changes this behavior to modify playlists that
     have been previously assigned.
-    
+
     The query includes a year (e.g. 2019) or year range (e.g.
     1999-2019), and then all subsequent words are classifications.If the
     classification is a number, the playlist is used to hold a part of
@@ -125,7 +138,17 @@ def tc_season(subject: State, query: Query) -> State:
 def _tc_classify_build_row(
     api: Spotify, db: sql.Connection, classification: str, project: Mob
 ) -> tuple[
-    bytes, int, str, str, str, list[str], list[int], datetime, str, str, list[str]
+    bytes,
+    int,
+    str,
+    str,
+    str,
+    list[str],
+    list[int],
+    datetime,
+    str,
+    str,
+    list[str],
 ]:
     album = api.album(project["root_album"]["uri"])
     retrieved_time = datetime.now()
@@ -135,7 +158,9 @@ def _tc_classify_build_row(
             case yr, mo, da:
                 release_day = date(int(yr), int(mo), int(da))
             case yr, mo:
-                release_day = date(int(yr), int(mo), calendar.monthrange(yr, mo)[1])
+                release_day = date(
+                    int(yr), int(mo), calendar.monthrange(yr, mo)[1]
+                )
             case [yr]:
                 release_day = date(int(yr), 12, 31)
             case _:
