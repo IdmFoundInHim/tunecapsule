@@ -5,7 +5,8 @@ Copyright (c) 2021 IdmFoundInHim, under MIT License
 __all__ = ["tc_classify", "tc_season"]
 
 import calendar
-import itertools
+from itertools import pairwise
+import itertools as it
 import sqlite3 as sql
 from collections.abc import Collection, Iterable, Iterator
 from datetime import MAXYEAR, MINYEAR, date, datetime
@@ -13,6 +14,7 @@ from hashlib import sha256
 from typing import cast
 
 from more_itertools import prepend
+import more_itertools as mit
 from projects import proj_projects
 from spotipy import Spotify, SpotifyPKCE
 from streamsort import (
@@ -81,6 +83,8 @@ def tc_classify(subject: State, query: Query) -> State:
             raise UnsupportedQueryError("classify", cast(str, query))
             # raise UnsupportedQueryError("Classification cannot be numeric")
         with sql.connect(DB_LOCATION) as database:
+            if proj["root_album"]["uri"] is None:
+                continue
             row = _tc_classify_build_row(
                 subject.api, database, classification, proj
             )
@@ -243,18 +247,11 @@ def _tc_classify_build_row(
     retrieved_time = datetime.now()
 
     try:
-        match album["release_date"].split(SPOTIFY_DATE_DELIMITER):
-            case yr, mo, da:
-                release_day = date(int(yr), int(mo), int(da))
-            case yr, mo:
-                release_day = date(
-                    int(yr), int(mo), calendar.monthrange(yr, mo)[1]
-                )
-            case [yr]:
-                release_day = end_year(yr)
-            case _:
-                raise UnexpectedResponseException
-    except (TypeError, ValueError) as err:
+        release_day = _tc_classify_parse_release(
+            album["release_date"].split(SPOTIFY_DATE_DELIMITER)
+        )
+    except AttributeError as err:
+        release_day = date(9999, 12, 31)  # Should not go in database
         raise UnexpectedResponseException from err
     artist_zip = sorted((a["name"], a["id"]) for a in album["artists"])
     artist_names, artist_group = map(list2strray, zip(*artist_zip))
@@ -290,6 +287,24 @@ def _tc_classify_build_row(
         album_spotify_id,
         track_spotify_ids,
     )
+
+
+def _tc_classify_parse_release(release_date):
+    try:
+        match release_date:
+            case yr, mo, da:
+                release_day = date(int(yr), int(mo), int(da))
+            case yr, mo:
+                release_day = date(
+                    int(yr), int(mo), calendar.monthrange(yr, mo)[1]
+                )
+            case yr,:
+                release_day = end_year(int(yr))
+            case _:
+                raise UnexpectedResponseException
+    except (TypeError, ValueError) as err:
+        raise UnexpectedResponseException from err
+    return release_day
 
 
 def _tc_classify_store_artist_group(
@@ -371,7 +386,7 @@ def _tc_season_update_year(
     api: Spotify, db: sql.Connection, year: int
 ) -> Mob | None:
     last_playlist = None
-    seasons = itertools.pairwise(_tc_season_calculate_year(db, year))
+    seasons = pairwise(_tc_season_calculate_year(db, year))
     for season_number, season_dates in enumerate(seasons):
         last_playlist = _tc_season_ensure_autoseason(
             api, db, (year, year), season_number, season_dates
