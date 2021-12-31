@@ -510,7 +510,11 @@ def _tc_season_retrieve_metadata(
 
 def _tc_season_retrieve_min_year(db: sql.Connection) -> int:
     """Finds the earliest release year among ranked tracks"""
-    ...
+    return date.fromisoformat(
+        db.execute(
+            "SELECT release_day FROM ranking ORDER BY release_day LIMIT 1"
+        ).fetchone()[0]
+    ).year
 
 
 def _tc_season_retrieve_projects(
