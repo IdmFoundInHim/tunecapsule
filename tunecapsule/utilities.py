@@ -2,8 +2,9 @@
 
 Copyright (c) 2021 IdmFoundInHim, under MIT License
 """
-from collections.abc import Collection
+from collections.abc import Collection, Iterable
 from datetime import date, datetime
+from typing import cast
 
 from ._constants import DB_STRRAY_DELIMITER
 
@@ -16,7 +17,7 @@ def strray2list(strray: str) -> list:
     return strray.split(DB_STRRAY_DELIMITER)
 
 
-def list2strray(lst: list) -> str:
+def list2strray(lst: Iterable) -> str:
     return DB_STRRAY_DELIMITER.join(map(str, lst))
 
 
@@ -41,9 +42,24 @@ DB_COLUMNS = {
 }
 
 
-def read_rows(rows: Collection[tuple], columns: str) -> tuple:
+def read_rows(rows: Collection[tuple], columns: str) -> list[tuple]:
     parsers = [DB_COLUMNS[name.strip()] for name in columns.split(",")]
     return [
         tuple(parser(column) for column, parser in zip(row, parsers))
         for row in rows
     ]
+
+
+def beginning_year(year: int):
+    return date(year, 1, 1)
+
+
+def end_year(year: int):
+    return date(year, 12, 31)
+
+
+def autoseason_name(year_range: tuple[int, int], season_number: int):
+    if year_range[0] == year_range[1]:
+        return f"{year_range[0]} {season_number}"
+    else:
+        return f"{year_range[0]}-{year_range[1]} {season_number}"

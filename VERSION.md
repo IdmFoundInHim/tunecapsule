@@ -24,6 +24,8 @@ Requires:
 
 * Statistics support configurable certifications
 * `classify` and `season` support configurable alphabet rankings
+* Standards for legal classifications, setting aside a group that
+  produces undefined behavior for functionality expansion
 
 ## 1.0.0
 
