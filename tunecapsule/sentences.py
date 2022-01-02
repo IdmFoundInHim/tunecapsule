@@ -28,7 +28,9 @@ from streamsort import (
 from streamsort.types import Mob, Query, State
 
 from ._constants import (
+    AUTOSEASON_RANKINGS,
     DB_LOCATION,
+    EXCLUSION_CERTIFICATIONS,
     IDEAL_AUTOSEASON_LENGTH,
     MAX_AUTOSEASON,
     RANKINGS,
@@ -42,6 +44,8 @@ from .utilities import (
     end_year,
     list2strray,
     read_rows,
+    sql_array,
+    strray2list,
 )
 
 YearRange = tuple[int | None, int | None]
@@ -446,7 +450,54 @@ def _tc_season_calculate_end(
     db: sql.Connection, start_date: date, max_year: int
 ) -> date:
     """Calculates end date for an ~80 song autoseason"""
-    ...
+    table = db.execute(
+        f"""
+        SELECT ranking.track_names, ranking.release_day
+        FROM ranking LEFT JOIN certification
+            ON ranking.sha256=certification.sha256
+                AND certification.classification
+                    IN {sql_array(EXCLUSION_CERTIFICATIONS)}
+        WHERE ranking.sha256 NOT IN (
+            SELECT helper_single.single_hash
+            FROM helper_single INNER JOIN ranking
+                ON ranking.sha256=helper_single.album_hash
+            WHERE ranking.classification IN {sql_array(AUTOSEASON_RANKINGS)}
+            AND ranking.release_day >= ? 
+            AND certification.classification IS NULL
+        )
+            AND ranking.classification IN {sql_array(AUTOSEASON_RANKINGS)}
+            AND ranking.release_day >= ? 
+            AND certification.classification IS NULL
+        ORDER BY ranking.release_day ASC LIMIT ?;""",
+        (
+            *EXCLUSION_CERTIFICATIONS,
+            *AUTOSEASON_RANKINGS,
+            start_date,
+            *AUTOSEASON_RANKINGS,
+            start_date,
+            IDEAL_AUTOSEASON_LENGTH,
+        ),
+    ).fetchall()
+    total_tracks, day, day_tracks = 0, "", 0
+    stop_day = stop_day_max = beginning_year(max_year + 1)
+    for track_names, release_day in table:
+        project_tracks = len(strray2list(track_names))
+        total_tracks += project_tracks
+        if release_day != day:
+            day, day_tracks = release_day, project_tracks
+        else:
+            day_tracks += project_tracks
+        if total_tracks >= 80:
+            # Adjust one day to minimize absolute deviation from ideal
+            if (
+                IDEAL_AUTOSEASON_LENGTH - (total_tracks - day_tracks)
+                < total_tracks - IDEAL_AUTOSEASON_LENGTH
+            ):
+                stop_day = date.fromisoformat(release_day)
+            else:
+                stop_day = date.fromisoformat(release_day) + timedelta(1)
+            break
+    return stop_day if stop_day < stop_day_max else stop_day_max
 
 
 def _tc_season_calculate_start(
