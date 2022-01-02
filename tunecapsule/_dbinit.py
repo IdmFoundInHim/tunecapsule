@@ -30,7 +30,8 @@ def initialize_database():
             f"""
         CREATE TABLE ranking (sha256 BLOB PRIMARY KEY,{CLASSIFICATION_TABLE_TEMPLATE});
         CREATE TABLE certification (sha256 BLOB, {CLASSIFICATION_TABLE_TEMPLATE});
-        CREATE TABLE season (year_range TEXT,
+        CREATE TABLE season (min_year INTEGER,
+                             max_year INTEGER,
                              classification TEXT,
                              start_date INTEGER,
                              stop_date INTEGER,

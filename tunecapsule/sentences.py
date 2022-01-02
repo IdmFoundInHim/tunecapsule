@@ -453,7 +453,13 @@ def _tc_season_calculate_start(
     db: sql.Connection, year: int, season_number: int
 ) -> date:
     """Finds the available start date for an autoseason"""
-    ...
+    row = db.execute(
+        "SELECT stop_date FROM season WHERE min_year = ? AND max_year = ? AND classification < ? ORDER BY stop_date DESC LIMIT 1",
+        (year, year, season_number),
+    ).fetchone()
+    if row:
+        return date.fromisoformat(row[0])
+    return beginning_year(year)
 
 
 def _tc_season_calculate_year(db: sql.Connection, year: int) -> Iterable[date]:
