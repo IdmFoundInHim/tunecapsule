@@ -9,7 +9,7 @@ from itertools import pairwise
 import itertools as it
 import sqlite3 as sql
 from collections.abc import Collection, Iterable, Iterator
-from datetime import MAXYEAR, MINYEAR, date, datetime
+from datetime import date, datetime, timedelta
 from hashlib import sha256
 from typing import cast
 
@@ -166,7 +166,7 @@ def tc_season(subject: State, query: Query) -> State:
     db = sql.connect(DB_LOCATION)
     if not isinstance(query, str):
         raise UnsupportedQueryError("season", str_mob(query))
-    match _tc_season_parse_query(query):
+    match list(_tc_season_parse_query(query)):
         case "update", (year, _year) if year == _year:
             out = _tc_season_update_year(subject.api, db, year)
         case "update", (min_year, max_year):
@@ -212,7 +212,7 @@ def tc_season(subject: State, query: Query) -> State:
             )
         case (min_year, max_year), str(classification):
             start_date = beginning_year(min_year)
-            end_date = end_year(max_year)
+            end_date = beginning_year(max_year + 1)
             playlist_id = subject.mob["id"]
             out = _tc_season_create(
                 subject.api,
@@ -251,7 +251,7 @@ def _tc_classify_build_row(
             album["release_date"].split(SPOTIFY_DATE_DELIMITER)
         )
     except AttributeError as err:
-        release_day = date(9999, 12, 31)  # Should not go in database
+        release_day = date.max  # Should not go in database
         raise UnexpectedResponseException from err
     artist_zip = sorted((a["name"], a["id"]) for a in album["artists"])
     artist_names, artist_group = map(list2strray, zip(*artist_zip))
@@ -430,7 +430,10 @@ def _tc_season_update_years(
                     db,
                     (target_min, target_max),
                     1,
-                    (beginning_year(target_min), end_year(target_max)),
+                    (
+                        beginning_year(target_min),
+                        beginning_year(target_max + 1),
+                    ),
                 )
             total = 0
             target_min = target_max = target_max + 1
@@ -468,15 +471,17 @@ def _tc_season_calculate_year(db: sql.Connection, year: int) -> Iterable[date]:
 
 
 def _tc_season_parse_query(query: str) -> Iterator[SeasonQueryGroup]:
-    query_tokens = (_tc_season_parse_token(t) for t in cast(str, query))
+    query_tokens = (
+        _tc_season_parse_token(t) for t in cast(str, query.split())
+    )
     for token in query_tokens:
         if isinstance(token, str) and token not in SEASON_KEYWORDS:
             try:
                 yield " ".join(
                     prepend(token, cast(Iterator[str], query_tokens))
                 )
-            except TypeError:
-                raise UnsupportedQueryError("season", query)
+            except TypeError as err:
+                raise UnsupportedQueryError("season", query) from err
         elif token == "update":
             yield "update"
             next(query_tokens)
