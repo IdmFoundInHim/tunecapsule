@@ -20,6 +20,7 @@ def initialize_database():
                               name TEXT,
                               classification TEXT,
                               track_names TEXT,
+                              track_durations_sec TEXT,
                               track_numbers TEXT,
                               retrieved_time INTEGER,
                               artist_group TEXT,
@@ -38,6 +39,11 @@ def initialize_database():
                              playlist_spotify_id TEXT);
         CREATE TABLE helper_artist_group (artist_group TEXT,
                                           artist_name TEXT,
-                                          artist_spotify_id TEXT)
+                                          artist_spotify_id TEXT);
+        CREATE TABLE helper_single (single_hash BLOB,
+                                    album_hash BLOB);
+        CREATE TABLE helper_artist_score (artist_group TEXT,
+                                          date_from INTEGER,
+                                          score INTEGER)
         """
         )

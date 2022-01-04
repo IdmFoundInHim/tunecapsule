@@ -99,17 +99,25 @@ def tc_classify(subject: State, query: Query) -> State:
                 target_table = "ranking"
                 # TODO Add processing of singles
             else:
-                columns_select = "classification, track_names"
-                existing_rows = database.execute(
-                    f"SELECT {columns_select} FROM certification WHERE sha256 = ?",
-                    (row[0],),
-                ).fetchall()
-                if any(ex == row[4:6] for ex in existing_rows):
-                    # TODO Warn about duplicate
+                columns_select = "classification, track_names, track_durations_sec, track_numbers, track_spotify_ids"
+                existing_row = only(
+                    read_rows(
+                        database.execute(
+                            f"""
+                    SELECT {columns_select} FROM certification
+                    WHERE sha256 = ? AND classification = ?
+                    """,
+                            (row[0], classification),
+                        ),
+                        columns_select,
+                    )
+                )
+                if existing_row:
+                    # TODO Properly append
                     return subject
                 target_table = "certification"
             database.execute(
-                f"INSERT INTO {target_table} VALUES ({'?, ' * 10}?)", row
+                f"INSERT INTO {target_table} VALUES {sql_array(row)}", row
             )
     return subject
 
@@ -241,12 +249,14 @@ def tc_season(subject: State, query: Query) -> State:
         case _:
             out = None
             raise UnsupportedQueryError("season", query)
+    db.commit()
+    db.close()
     return State(subject[0], out or subject[1], subject[2])
 
 
 def _tc_classify_build_row(
     api: Spotify, db: sql.Connection, classification: str, project: Mob
-) -> tuple[bytes, date, str, str, str, str, str, datetime, str, str, str,]:
+) -> tuple[bytes, date, str, str, str, str, str, str, datetime, str, str, str]:
     album = cast(Mob, api.album(project["root_album"]["uri"]))
     retrieved_time = datetime.now()
 
@@ -265,11 +275,16 @@ def _tc_classify_build_row(
         bytes(release_day.isoformat() + artist_names + name, SHA256_ENCODING)
     ).digest()
     included_track_ids = [t["id"] for t in project["objects"]]
-    track_names, track_numbers, track_spotify_ids = map(
+    track_names, track_durations_sec, track_numbers, track_spotify_ids = map(
         list2strray,
         zip(
             *[
-                (t["name"], t["track_number"], t["id"])
+                (
+                    t["name"],
+                    t["duration_ms"] // 1000,
+                    t["track_number"],
+                    t["id"],
+                )
                 for t in results_generator(
                     cast(SpotifyPKCE, api.auth_manager), album["tracks"]
                 )
@@ -285,6 +300,7 @@ def _tc_classify_build_row(
         name,
         classification,
         track_names,
+        track_durations_sec,
         track_numbers,
         retrieved_time,
         artist_group,
