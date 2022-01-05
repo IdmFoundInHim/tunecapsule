@@ -647,13 +647,13 @@ def _season_retrieve_rows(
     start_date, stop_date = start_date or date.min, stop_date or date.max
     cursor = db.execute(
         f"""
-        SELECT {columns.strip(';').format(target_table)}
+        SELECT DISTINCT {columns.strip(';').format(target_table)}
         FROM {target_table} LEFT JOIN certification AS exclusion
             ON {target_table}.sha256 = exclusion.sha256
                 AND exclusion.classification
                     IN {sql_array(exclusion_certifications)}
             LEFT JOIN helper_artist_score
-            ON {target_table}.artist_group=helper_artist_score.score
+            ON {target_table}.artist_group=helper_artist_score.artist_group
                 AND {target_table}.release_day=helper_artist_score.date_from
         WHERE {target_table}.sha256 NOT IN (
             SELECT helper_single.single_hash
@@ -668,7 +668,7 @@ def _season_retrieve_rows(
             AND {target_table}.release_day >= ?
             AND {target_table}.release_day < ?
             AND exclusion.classification IS NULL
-        ORDER BY {target_table}.release_day ASC, helper_artist_score.score
+        ORDER BY {target_table}.release_day ASC, helper_artist_score.score DESC
         """,
         (
             *exclusion_certifications,
