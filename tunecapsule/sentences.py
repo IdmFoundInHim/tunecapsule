@@ -189,7 +189,9 @@ def ss_season(subject: State, query: Query) -> State:
             out = _season_update_years(subject.api, db, min_year, max_year)
         case "update",:
             out = _season_update_years(subject.api, db, *NULL_YEAR_RANGE)
-        case "update", (min_year, max_year), str(classification):
+        case "update", (min_year, max_year), classification if isinstance(
+            classification, int | str
+        ):
             target = _season_retrieve_metadata(
                 db, (min_year, max_year), classification
             )
