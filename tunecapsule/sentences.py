@@ -2,7 +2,7 @@
 
 Copyright (c) 2021 IdmFoundInHim, under MIT License
 """
-__all__ = ["tc_classify", "tc_season"]
+__all__ = ["ss_classify", "ss_season"]
 
 import calendar
 import itertools as it
@@ -10,13 +10,13 @@ import sqlite3 as sql
 from collections.abc import Collection, Iterable, Iterator
 from datetime import date, datetime, timedelta
 from hashlib import sha256
-from itertools import pairwise
+from itertools import pairwise, takewhile
 from os import read
 from typing import cast
 
 import more_itertools as mit
-from more_itertools import flatten, only, prepend
-from projects import proj_projects
+from more_itertools import flatten, iterate, only, prepend
+from projects import ss_projects
 from spotipy import Spotify, SpotifyPKCE
 from streamsort import (
     NoResultsError,
@@ -58,7 +58,7 @@ HashDigest = bytes
 NULL_YEAR_RANGE = (None, None)
 
 
-def tc_classify(subject: State, query: Query) -> State:
+def ss_classify(subject: State, query: Query) -> State:
     """Associates a project(s) with a classification
 
     The subject will be assigned the query as a classification.
@@ -78,7 +78,7 @@ def tc_classify(subject: State, query: Query) -> State:
     dynamic representation of each project by Spotify URIs.
     """
     for proj in cast(
-        list[Mob], proj_projects(subject, subject.mob).mob["objects"]
+        list[Mob], ss_projects(subject, subject.mob).mob["objects"]
     ):
         try:
             classification = cast(str, query).split()[0].upper()
@@ -93,7 +93,7 @@ def tc_classify(subject: State, query: Query) -> State:
         with sql.connect(DB_LOCATION) as database:
             if proj["root_album"]["uri"] is None:
                 continue
-            row = _tc_classify_build_row(
+            row = _classify_build_row(
                 subject.api, database, classification, proj
             )
             if classification in RANKINGS:
@@ -126,7 +126,7 @@ def tc_classify(subject: State, query: Query) -> State:
     return subject
 
 
-def tc_season(subject: State, query: Query) -> State:
+def ss_season(subject: State, query: Query) -> State:
     """Associates a playlist with certain rankings or a certification
 
     The subject will be **overwritten** to hold songs in chronological
@@ -182,42 +182,42 @@ def tc_season(subject: State, query: Query) -> State:
     db = sql.connect(DB_LOCATION)
     if not isinstance(query, str):
         raise UnsupportedQueryError("season", str_mob(query))
-    match list(_tc_season_parse_query(query)):
+    match list(_season_parse_query(query)):
         case "update", (year, _year) if year == _year:
-            out = _tc_season_update_year(subject.api, db, year)
+            out = _season_update_year(subject.api, db, year)
         case "update", (min_year, max_year):
-            out = _tc_season_update_years(subject.api, db, min_year, max_year)
+            out = _season_update_years(subject.api, db, min_year, max_year)
         case "update",:
-            out = _tc_season_update_years(subject.api, db, *NULL_YEAR_RANGE)
+            out = _season_update_years(subject.api, db, *NULL_YEAR_RANGE)
         case "update", (min_year, max_year), str(classification):
-            target = _tc_season_retrieve_metadata(
+            target = _season_retrieve_metadata(
                 db, (min_year, max_year), classification
             )
-            out = _tc_season_upload(
+            out = _season_upload(
                 subject.api,
                 db,
                 classification,
-                target["start_date"],
-                target["end_date"],
-                target["playlist_id"],
+                cast(date, target["start_date"]),
+                cast(date, target["stop_date"]),
+                cast(str, target["playlist_spotify_id"]),
             )
         case "update", str(classification):
-            target = _tc_season_retrieve_metadata(
+            target = _season_retrieve_metadata(
                 db, NULL_YEAR_RANGE, classification
             )
-            out = _tc_season_upload(
+            out = _season_upload(
                 subject.api,
                 db,
                 classification,
                 None,
                 None,
-                target["playlist_id"],
+                cast(str, target["playlist_spotify_id"]),
             )
         case (min_year, max_year), int(season_num):
-            start_date = _tc_season_calculate_start(db, min_year, season_num)
-            end_date = _tc_season_calculate_end(db, start_date, max_year)
+            start_date = _season_calculate_start(db, min_year, season_num)
+            end_date = _season_calculate_end(db, start_date, max_year)
             playlist_id = subject.mob["id"]
-            out = _tc_season_create(
+            out = _season_create(
                 subject.api,
                 db,
                 season_num,
@@ -229,7 +229,7 @@ def tc_season(subject: State, query: Query) -> State:
             start_date = beginning_year(min_year)
             end_date = beginning_year(max_year + 1)
             playlist_id = subject.mob["id"]
-            out = _tc_season_create(
+            out = _season_create(
                 subject.api,
                 db,
                 classification,
@@ -239,7 +239,7 @@ def tc_season(subject: State, query: Query) -> State:
             )
         case str(classification),:
             playlist_id = subject.mob["id"]
-            out = _tc_season_create(
+            out = _season_create(
                 subject.api,
                 db,
                 classification,
@@ -255,14 +255,14 @@ def tc_season(subject: State, query: Query) -> State:
     return State(subject[0], out or subject[1], subject[2])
 
 
-def _tc_classify_build_row(
+def _classify_build_row(
     api: Spotify, db: sql.Connection, classification: str, project: Mob
 ) -> tuple[bytes, date, str, str, str, str, str, str, datetime, str, str, str]:
     album = cast(Mob, api.album(project["root_album"]["uri"]))
     retrieved_time = datetime.now()
 
     try:
-        release_day = _tc_classify_parse_release(
+        release_day = _classify_parse_release(
             album["release_date"].split(SPOTIFY_DATE_DELIMITER)
         )
     except AttributeError as err:
@@ -270,7 +270,7 @@ def _tc_classify_build_row(
         raise UnexpectedResponseException from err
     artist_zip = sorted((a["name"], a["id"]) for a in album["artists"])
     artist_names, artist_group = map(list2strray, zip(*artist_zip))
-    _tc_classify_store_artist_group(db, artist_group, artist_zip)
+    _classify_store_artist_group(db, artist_group, artist_zip)
     name = cast(str, project["name"])
     hash_digest = sha256(
         bytes(release_day.isoformat() + artist_names + name, SHA256_ENCODING)
@@ -310,7 +310,7 @@ def _tc_classify_build_row(
     )
 
 
-def _tc_classify_parse_release(release_date):
+def _classify_parse_release(release_date):
     try:
         match release_date:
             case yr, mo, da:
@@ -328,7 +328,7 @@ def _tc_classify_parse_release(release_date):
     return release_day
 
 
-def _tc_classify_store_artist_group(
+def _classify_store_artist_group(
     db: sql.Connection, artist_group: str, artists: Collection[tuple[str, str]]
 ):
     existing_rows = db.execute(
@@ -345,7 +345,7 @@ def _tc_classify_store_artist_group(
     assert set(existing_rows) == set(artists)
 
 
-def _tc_season_upload(
+def _season_upload(
     api: Spotify,
     db: sql.Connection,
     classification: str | int,
@@ -353,7 +353,7 @@ def _tc_season_upload(
     stop_date: date | None,
     playlist_id: str,
 ) -> Mob:
-    for artist_group, release_day in _tc_season_retrieve_rows(
+    for artist_group, release_day in _season_retrieve_rows(
         db,
         "{0}.artist_group, {0}.release_day",
         classification,
@@ -361,13 +361,11 @@ def _tc_season_upload(
         stop_date,
     ):
         store_artist_group_score(db, artist_group, release_day)
-    season = _tc_season_retrieve_tracks(
-        db, classification, start_date, stop_date
-    )
-    return _tc_season_transmit_projects(api, playlist_id, season)
+    season = _season_retrieve_tracks(db, classification, start_date, stop_date)
+    return _season_transmit_projects(api, playlist_id, season)
 
 
-def _tc_season_create(
+def _season_create(
     api: Spotify,
     db: sql.Connection,
     classification: str | int,
@@ -375,15 +373,15 @@ def _tc_season_create(
     end_date: date | None,
     playlist_id: str,
 ) -> Mob:
-    _tc_season_store_metadata(
+    _season_store_metadata(
         db, classification, start_date, end_date, playlist_id
     )
-    return _tc_season_upload(
+    return _season_upload(
         api, db, classification, start_date, end_date, playlist_id
     )
 
 
-def _tc_season_ensure_autoseason(
+def _season_ensure_autoseason(
     api: Spotify,
     db: sql.Connection,
     year_range: tuple[int, int],
@@ -391,14 +389,14 @@ def _tc_season_ensure_autoseason(
     season_dates: tuple[date, date],
 ) -> Mob:
     try:
-        playlist = _tc_season_retrieve_metadata(db, year_range, season_number)[
-            "playlist_id"
+        playlist = _season_retrieve_metadata(db, year_range, season_number)[
+            "playlist_spotify_id"
         ]
-        return _tc_season_upload(
-            api, db, season_number, *season_dates, playlist
+        return _season_upload(
+            api, db, season_number, *season_dates, cast(str, playlist)
         )
-    except IndexError:  # Ensure no unintentional capture
-        return _tc_season_create(
+    except NoResultsError:  # Ensure no unintentional capture
+        return _season_create(
             api,
             db,
             season_number,
@@ -409,27 +407,30 @@ def _tc_season_ensure_autoseason(
         )
 
 
-def _tc_season_update_year(
+def _season_update_year(
     api: Spotify, db: sql.Connection, year: int
 ) -> Mob | None:
     last_playlist = None
-    seasons = pairwise(_tc_season_calculate_year(db, year))
-    for season_number, season_dates in enumerate(seasons):
-        last_playlist = _tc_season_ensure_autoseason(
+    seasons = pairwise(_season_calculate_year(db, year))
+    for season_number, season_dates in enumerate(seasons, 1):
+        last_playlist = _season_ensure_autoseason(
             api, db, (year, year), season_number, season_dates
         )
     return last_playlist
 
 
-def _tc_season_update_years(
-    api: Spotify, db, min_year, max_year
+def _season_update_years(
+    api: Spotify,
+    db: sql.Connection,
+    min_year: int | None,
+    max_year: int | None,
 ) -> Mob | None:
     last_playlist = None
     # Loop constant:
     max_year = max_year or date.today().year
     # Loop variables:
     total = 0
-    target_min = min_year or _tc_season_retrieve_min_year(db)
+    target_min = min_year or _season_retrieve_min_year(db)
     target_max = target_min
     while target_max <= max_year:
         # Each run of the loop produces no more than one
@@ -438,7 +439,7 @@ def _tc_season_update_years(
         # will never be run with the same pair of
         # `(target_min, target_max)` values. This design choice
         # was made to ease debugging.
-        selected_len = _tc_season_retrieve_year_len(db, target_max)
+        selected_len = _season_retrieve_year_len(db, target_max)
         total += selected_len
         if total >= IDEAL_AUTOSEASON_LENGTH or target_max == max_year:
             if (
@@ -450,9 +451,9 @@ def _tc_season_update_years(
                 # enough for its own season(s)
                 target_max -= 1
             if target_min == target_max:
-                last_playlist = _tc_season_update_year(api, db, target_min)
+                last_playlist = _season_update_year(api, db, target_min)
             elif total:
-                last_playlist = _tc_season_ensure_autoseason(
+                last_playlist = _season_ensure_autoseason(
                     api,
                     db,
                     (target_min, target_max),
@@ -469,12 +470,12 @@ def _tc_season_update_years(
     return last_playlist
 
 
-def _tc_season_calculate_end(
+def _season_calculate_end(
     db: sql.Connection, start_date: date, max_year: int
 ) -> date:
     """Calculates end date for an ~80 song autoseason"""
     stop_date = stop_day_max = beginning_year(max_year + 1)
-    table = _tc_season_retrieve_rows(
+    table = _season_retrieve_rows(
         db,
         "ranking.track_names, ranking.release_day",
         0,
@@ -503,7 +504,7 @@ def _tc_season_calculate_end(
     return stop_date
 
 
-def _tc_season_calculate_start(
+def _season_calculate_start(
     db: sql.Connection, year: int, season_number: int
 ) -> date:
     """Finds the available start date for an autoseason"""
@@ -516,7 +517,7 @@ def _tc_season_calculate_start(
     return beginning_year(year)
 
 
-def _tc_season_calculate_year(db: sql.Connection, year: int) -> Iterable[date]:
+def _season_calculate_year(db: sql.Connection, year: int) -> Iterable[date]:
     """Returns sequence of dates for ~80 song autoseasons over a year
 
     Should be expected to return any type of iterable, anticipating
@@ -527,13 +528,17 @@ def _tc_season_calculate_year(db: sql.Connection, year: int) -> Iterable[date]:
     `len` of return value should not exceed 1 if there are 0 projects in
     the selected year.
     """
-    ...
+    if not _season_retrieve_year_len(db, year):
+        return []
+    season_divider = beginning_year(year)
+    yield season_divider
+    while season_divider != beginning_year(year + 1):
+        season_divider = _season_calculate_end(db, season_divider, year)
+        yield season_divider
 
 
-def _tc_season_parse_query(query: str) -> Iterator[SeasonQueryGroup]:
-    query_tokens = (
-        _tc_season_parse_token(t) for t in cast(str, query.split())
-    )
+def _season_parse_query(query: str) -> Iterator[SeasonQueryGroup]:
+    query_tokens = (_season_parse_token(t) for t in cast(str, query.split()))
     for token in query_tokens:
         if isinstance(token, str) and token not in SEASON_KEYWORDS:
             try:
@@ -542,14 +547,11 @@ def _tc_season_parse_query(query: str) -> Iterator[SeasonQueryGroup]:
                 )
             except TypeError as err:
                 raise UnsupportedQueryError("season", query) from err
-        elif token == "update":
-            yield "update"
-            next(query_tokens)
         else:
             yield token
 
 
-def _tc_season_parse_token(token: str) -> SeasonQueryGroup:
+def _season_parse_token(token: str) -> SeasonQueryGroup:
     match token.split("-"):
         case min, max if len(max) == 2 and len(
             min
@@ -566,14 +568,32 @@ def _tc_season_parse_token(token: str) -> SeasonQueryGroup:
     return token
 
 
-def _tc_season_retrieve_metadata(
+def _season_retrieve_metadata(
     db: sql.Connection, year_range: YearRange, classification: str | int
-) -> Mob:
+) -> dict[str, int | str | date]:
     """Gets metadata for a single season from the database"""
-    ...
+    columns = "min_year, max_year, classification, start_date, stop_date, playlist_spotify_id"
+    min_check = "" if year_range[0] else "OR min_year IS NULL"
+    max_check = "" if year_range[1] else "OR max_year IS NULL"
+    rows = read_rows(
+        db.execute(
+            f"""
+        SELECT * FROM season
+        WHERE classification = ? 
+            AND (min_year = ? {min_check})
+            AND (max_year = ? {max_check})
+        """,
+            (classification, *year_range),
+        ),
+        columns,
+    )
+    try:
+        return {k: v for k, v in zip(columns.split(", "), next(rows))}
+    except StopIteration:
+        raise NoResultsError
 
 
-def _tc_season_retrieve_min_year(db: sql.Connection) -> int:
+def _season_retrieve_min_year(db: sql.Connection) -> int:
     """Finds the earliest release year among ranked tracks"""
     return date.fromisoformat(
         db.execute(
@@ -582,7 +602,7 @@ def _tc_season_retrieve_min_year(db: sql.Connection) -> int:
     ).year
 
 
-def _tc_season_retrieve_tracks(
+def _season_retrieve_tracks(
     db: sql.Connection,
     classification: str | int,
     start_date: date | None,
@@ -590,7 +610,7 @@ def _tc_season_retrieve_tracks(
 ) -> Iterator[str]:
     return flatten(
         cast(list[str], row[0])
-        for row in _tc_season_retrieve_rows(
+        for row in _season_retrieve_rows(
             db,
             "{0}.track_spotify_ids",
             classification,
@@ -600,7 +620,7 @@ def _tc_season_retrieve_tracks(
     )
 
 
-def _tc_season_retrieve_rows(
+def _season_retrieve_rows(
     db: sql.Connection,
     columns: str,
     classification: str | int,
@@ -663,12 +683,18 @@ def _tc_season_retrieve_rows(
     yield from read_rows(cursor, columns)
 
 
-def _tc_season_retrieve_year_len(db: sql.Connection, year: int) -> int:
+def _season_retrieve_year_len(db: sql.Connection, year: int) -> int:
     """Counts the tracks in a year eligible for autoseasons"""
-    ...
+    return len(
+        set(
+            _season_retrieve_tracks(
+                db, 0, beginning_year(year), beginning_year(year + 1)
+            )
+        )
+    )
 
 
-def _tc_season_store_metadata(
+def _season_store_metadata(
     db: sql.Connection,
     classification: str | int,
     start_date: date | None,
@@ -697,7 +723,7 @@ def _tc_season_store_metadata(
     )
 
 
-def _tc_season_transmit_projects(
+def _season_transmit_projects(
     spotify: Spotify, playlist_id: str, season: Iterable[str]
 ) -> Mob:
     """Uploads a season's tracks to a Spotify playlist"""
