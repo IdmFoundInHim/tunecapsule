@@ -5,23 +5,26 @@ Copyright (c) 2021 IdmFoundInHim, under MIT License
 __all__ = ["tc_classify", "tc_season"]
 
 import calendar
-from itertools import pairwise
 import itertools as it
 import sqlite3 as sql
 from collections.abc import Collection, Iterable, Iterator
 from datetime import date, datetime, timedelta
 from hashlib import sha256
+from itertools import pairwise
+from os import read
 from typing import cast
 
-from more_itertools import prepend
 import more_itertools as mit
+from more_itertools import flatten, only, prepend
 from projects import proj_projects
 from spotipy import Spotify, SpotifyPKCE
 from streamsort import (
+    NoResultsError,
     UnexpectedResponseException,
     UnsupportedQueryError,
     results_generator,
     ss_new,
+    ss_remove,
     state_only_api,
     str_mob,
 )
@@ -38,6 +41,7 @@ from ._constants import (
     SHA256_ENCODING,
     SPOTIFY_DATE_DELIMITER,
 )
+from .stats import store_artist_group_score
 from .utilities import (
     autoseason_name,
     beginning_year,
@@ -216,7 +220,6 @@ def tc_season(subject: State, query: Query) -> State:
             out = _tc_season_create(
                 subject.api,
                 db,
-                (min_year, max_year),
                 season_num,
                 start_date,
                 end_date,
@@ -229,7 +232,6 @@ def tc_season(subject: State, query: Query) -> State:
             out = _tc_season_create(
                 subject.api,
                 db,
-                (min_year, max_year),
                 classification,
                 start_date,
                 end_date,
@@ -240,7 +242,6 @@ def tc_season(subject: State, query: Query) -> State:
             out = _tc_season_create(
                 subject.api,
                 db,
-                NULL_YEAR_RANGE,
                 classification,
                 None,
                 None,
@@ -349,11 +350,19 @@ def _tc_season_upload(
     db: sql.Connection,
     classification: str | int,
     start_date: date | None,
-    end_date: date | None,
+    stop_date: date | None,
     playlist_id: str,
 ) -> Mob:
-    season = _tc_season_retrieve_projects(
-        db, classification, start_date, end_date
+    for artist_group, release_day in _tc_season_retrieve_rows(
+        db,
+        "{0}.artist_group, {0}.release_day",
+        classification,
+        start_date,
+        stop_date,
+    ):
+        store_artist_group_score(db, artist_group, release_day)
+    season = _tc_season_retrieve_tracks(
+        db, classification, start_date, stop_date
     )
     return _tc_season_transmit_projects(api, playlist_id, season)
 
@@ -361,14 +370,13 @@ def _tc_season_upload(
 def _tc_season_create(
     api: Spotify,
     db: sql.Connection,
-    year_range: YearRange,
     classification: str | int,
     start_date: date | None,
     end_date: date | None,
     playlist_id: str,
 ) -> Mob:
     _tc_season_store_metadata(
-        db, year_range, classification, start_date, end_date, playlist_id
+        db, classification, start_date, end_date, playlist_id
     )
     return _tc_season_upload(
         api, db, classification, start_date, end_date, playlist_id
@@ -393,7 +401,6 @@ def _tc_season_ensure_autoseason(
         return _tc_season_create(
             api,
             db,
-            year_range,
             season_number,
             *season_dates,
             ss_new(
@@ -466,38 +473,18 @@ def _tc_season_calculate_end(
     db: sql.Connection, start_date: date, max_year: int
 ) -> date:
     """Calculates end date for an ~80 song autoseason"""
-    table = db.execute(
-        f"""
-        SELECT ranking.track_names, ranking.release_day
-        FROM ranking LEFT JOIN certification
-            ON ranking.sha256=certification.sha256
-                AND certification.classification
-                    IN {sql_array(EXCLUSION_CERTIFICATIONS)}
-        WHERE ranking.sha256 NOT IN (
-            SELECT helper_single.single_hash
-            FROM helper_single INNER JOIN ranking
-                ON ranking.sha256=helper_single.album_hash
-            WHERE ranking.classification IN {sql_array(AUTOSEASON_RANKINGS)}
-            AND ranking.release_day >= ? 
-            AND certification.classification IS NULL
-        )
-            AND ranking.classification IN {sql_array(AUTOSEASON_RANKINGS)}
-            AND ranking.release_day >= ? 
-            AND certification.classification IS NULL
-        ORDER BY ranking.release_day ASC LIMIT ?;""",
-        (
-            *EXCLUSION_CERTIFICATIONS,
-            *AUTOSEASON_RANKINGS,
-            start_date,
-            *AUTOSEASON_RANKINGS,
-            start_date,
-            IDEAL_AUTOSEASON_LENGTH,
-        ),
-    ).fetchall()
+    stop_date = stop_day_max = beginning_year(max_year + 1)
+    table = _tc_season_retrieve_rows(
+        db,
+        "ranking.track_names, ranking.release_day",
+        0,
+        start_date,
+        stop_date,
+        EXCLUSION_CERTIFICATIONS,
+    )
     total_tracks, day, day_tracks = 0, "", 0
-    stop_day = stop_day_max = beginning_year(max_year + 1)
     for track_names, release_day in table:
-        project_tracks = len(strray2list(track_names))
+        project_tracks = len(track_names)
         total_tracks += project_tracks
         if release_day != day:
             day, day_tracks = release_day, project_tracks
@@ -509,11 +496,11 @@ def _tc_season_calculate_end(
                 IDEAL_AUTOSEASON_LENGTH - (total_tracks - day_tracks)
                 < total_tracks - IDEAL_AUTOSEASON_LENGTH
             ):
-                stop_day = date.fromisoformat(release_day)
+                stop_date = release_day
             else:
-                stop_day = date.fromisoformat(release_day) + timedelta(1)
+                stop_date = release_day + timedelta(1)
             break
-    return stop_day if stop_day < stop_day_max else stop_day_max
+    return stop_date
 
 
 def _tc_season_calculate_start(
@@ -595,18 +582,85 @@ def _tc_season_retrieve_min_year(db: sql.Connection) -> int:
     ).year
 
 
-def _tc_season_retrieve_projects(
+def _tc_season_retrieve_tracks(
     db: sql.Connection,
     classification: str | int,
     start_date: date | None,
-    end_date: date | None,
-) -> Mob:
+    stop_date: date | None,
+) -> Iterator[str]:
+    return flatten(
+        cast(list[str], row[0])
+        for row in _tc_season_retrieve_rows(
+            db,
+            "{0}.track_spotify_ids",
+            classification,
+            start_date,
+            stop_date,
+        )
+    )
+
+
+def _tc_season_retrieve_rows(
+    db: sql.Connection,
+    columns: str,
+    classification: str | int,
+    start_date: date | None,
+    stop_date: date | None,
+    exclusion_certifications: Collection[str] = (),
+) -> Iterator[tuple]:
     """Gathers projects belonging in a single season in release order
+
+    The `columns` parameter should NOT be constructed from user input,
+    as this could open vulnerability to an SQL injection attack. Use {0}
+    in place of the table name for automatic substitution (e.g
+    "{0}.artist_group, {0}.classification").
 
     If a date is `None`, the datetime.MAXYEAR and datetime.MINYEAR will
     be used to bound the season.
     """
-    ...
+    if isinstance(classification, int):
+        classifications = AUTOSEASON_RANKINGS
+        target_table = "ranking"
+    else:
+        classifications = strray2list(classification)
+        target_table = "certification"
+    start_date, stop_date = start_date or date.min, stop_date or date.max
+    cursor = db.execute(
+        f"""
+        SELECT {columns.strip(';').format(target_table)}
+        FROM {target_table} LEFT JOIN certification AS exclusion
+            ON {target_table}.sha256 = exclusion.sha256
+                AND exclusion.classification
+                    IN {sql_array(exclusion_certifications)}
+            LEFT JOIN helper_artist_score
+            ON {target_table}.artist_group=helper_artist_score.score
+                AND {target_table}.release_day=helper_artist_score.date_from
+        WHERE {target_table}.sha256 NOT IN (
+            SELECT helper_single.single_hash
+            FROM helper_single INNER JOIN {target_table}
+                ON {target_table}.sha256 = helper_single.album_hash
+            WHERE {target_table}.classification IN {sql_array(classifications)}
+            AND {target_table}.release_day >= ?
+            AND {target_table}.release_day < ?
+            AND exclusion.classification IS NULL
+        )
+            AND {target_table}.classification IN {sql_array(classifications)}
+            AND {target_table}.release_day >= ?
+            AND {target_table}.release_day < ?
+            AND exclusion.classification IS NULL
+        ORDER BY {target_table}.release_day ASC, helper_artist_score.score
+        """,
+        (
+            *exclusion_certifications,
+            *classifications,
+            start_date,
+            stop_date,
+            *classifications,
+            start_date,
+            stop_date,
+        ),
+    )
+    yield from read_rows(cursor, columns)
 
 
 def _tc_season_retrieve_year_len(db: sql.Connection, year: int) -> int:
@@ -616,18 +670,45 @@ def _tc_season_retrieve_year_len(db: sql.Connection, year: int) -> int:
 
 def _tc_season_store_metadata(
     db: sql.Connection,
-    year_range: YearRange,
     classification: str | int,
     start_date: date | None,
-    end_date: date | None,
+    stop_date: date | None,
     playlist_id: str,
-) -> HashDigest:
+):
     """Saves metadata for a single season in the database"""
-    ...
+    # TODO Duplicate Check
+    min_year = start_date.year if start_date else None
+    if stop_date is None:
+        max_year = None
+    elif stop_date.month == 1 and stop_date.day == 1:
+        max_year = stop_date.year - 1
+    else:
+        max_year = stop_date.year
+    db.execute(
+        "INSERT INTO season VALUES (?, ?, ?, ?, ?, ?)",
+        (
+            min_year,
+            max_year,
+            classification,
+            start_date,
+            stop_date,
+            playlist_id,
+        ),
+    )
 
 
 def _tc_season_transmit_projects(
-    spotify: Spotify, playlist: str, season: Mob
+    spotify: Spotify, playlist_id: str, season: Iterable[str]
 ) -> Mob:
     """Uploads a season's tracks to a Spotify playlist"""
-    ...
+    try:
+        season = prepend(next(iter(season)), season)
+    except StopIteration:
+        raise NoResultsError
+    mob = cast(Mob, spotify.playlist(playlist_id))
+    ss_remove(State(spotify, mob), mob)
+    spotify.playlist_add_items(
+        playlist_id,
+        season,
+    )
+    return cast(Mob, spotify.playlist(playlist_id))
