@@ -718,7 +718,7 @@ def _season_parse_query(query: str) -> Iterator[SeasonQueryGroup]:
             try:
                 yield " ".join(
                     prepend(token, cast(Iterator[str], query_tokens))
-                )
+                ).upper()
             except TypeError as err:
                 raise UnsupportedQueryError("season", query) from err
         else:
@@ -817,7 +817,10 @@ def _season_retrieve_rows(
         target_table = "ranking"
     else:
         classifications = strray2list(classification)
-        target_table = "certification"
+        if all(c in RANKINGS for c in classifications):
+            target_table = "ranking"
+        else:
+            target_table = "certification"
     start_date, stop_date = start_date or date.min, stop_date or date.max
     cursor = db.execute(
         f"""
