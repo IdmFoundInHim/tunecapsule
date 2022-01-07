@@ -2,7 +2,7 @@
 
 ## 0.7.0 (Functionality Milestone)
 
-Requires:
+Requires the following tested functionality:
 
 * Complete `classify` and `season` functionality
 * `classify`, `season`, and statistics support A, B, C, and E rankings
