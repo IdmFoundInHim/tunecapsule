@@ -5,18 +5,13 @@ Copyright (c) 2021 IdmFoundInHim, under MIT License
 __all__ = ["ss_classify", "ss_season"]
 
 import calendar
-import itertools as it
 import sqlite3 as sql
 from collections.abc import Collection, Iterable, Iterator
 from datetime import date, datetime, timedelta
-from hashlib import sha256
-from itertools import pairwise, takewhile
-from os import read
-from types import new_class
+from itertools import pairwise
 from typing import Sequence, cast
 
-import more_itertools as mit
-from more_itertools import flatten, iterate, only, prepend
+from more_itertools import chunked, flatten, only, prepend
 from projects import ss_projects
 from spotipy import Spotify, SpotifyPKCE
 from streamsort import (
@@ -539,7 +534,9 @@ def _season_upload(
     ):
         store_artist_group_score(db, artist_group, release_day)
     season = _season_retrieve_tracks(db, classification, start_date, stop_date)
-    return _season_transmit_projects(api, playlist_id, season)
+    return_value = _season_transmit_projects(api, playlist_id, season)
+    db.commit()
+    return return_value
 
 
 def _season_create(
@@ -910,8 +907,6 @@ def _season_transmit_projects(
         raise NoResultsError
     mob = cast(Mob, spotify.playlist(playlist_id))
     ss_remove(State(spotify, mob), mob)
-    spotify.playlist_add_items(
-        playlist_id,
-        season,
-    )
+    for song_chunk in chunked(season, 100):
+        spotify.playlist_add_items(playlist_id, song_chunk)
     return cast(Mob, spotify.playlist(playlist_id))
