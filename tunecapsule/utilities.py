@@ -69,7 +69,7 @@ def autoseason_name(year_range: tuple[int, int], season_number: int):
     if year_range[0] == year_range[1]:
         return f"{year_range[0]}-{season_number}"
     else:
-        return f"{year_range[0]}-{year_range[1]}-{season_number}"
+        return f"{year_range[0]}-{year_range[1]}"
 
 
 def sql_array(options: Collection):

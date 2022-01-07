@@ -12,13 +12,15 @@ from datetime import date, datetime, timedelta
 from hashlib import sha256
 from itertools import pairwise, takewhile
 from os import read
-from typing import cast
+from types import new_class
+from typing import Sequence, cast
 
 import more_itertools as mit
 from more_itertools import flatten, iterate, only, prepend
 from projects import ss_projects
 from spotipy import Spotify, SpotifyPKCE
 from streamsort import (
+    IO_NOTIFY as io_notify,
     NoResultsError,
     UnexpectedResponseException,
     UnsupportedQueryError,
@@ -38,7 +40,6 @@ from ._constants import (
     MAX_AUTOSEASON,
     RANKINGS,
     SEASON_KEYWORDS,
-    SHA256_ENCODING,
     SPOTIFY_DATE_DELIMITER,
 )
 from .stats import store_artist_group_score
@@ -77,7 +78,7 @@ def ss_classify(subject: State, query: Query) -> State:
     of each project based on its state in Spotify at runtime and a
     dynamic representation of each project by Spotify URIs.
     """
-    for proj in cast(
+    for project in cast(
         list[Mob], ss_projects(subject, subject.mob).mob["objects"]
     ):
         try:
@@ -91,38 +92,7 @@ def ss_classify(subject: State, query: Query) -> State:
             raise UnsupportedQueryError("classify", cast(str, query))
             # raise UnsupportedQueryError("Classification cannot be numeric")
         with sql.connect(DB_LOCATION) as database:
-            if proj["root_album"]["uri"] is None:
-                continue
-            row = _classify_build_row(
-                subject.api, database, classification, proj
-            )
-            if classification in RANKINGS:
-                database.execute(
-                    "DELETE FROM ranking WHERE sha256 = ?", (row[0],)
-                )
-                target_table = "ranking"
-                # TODO Add processing of singles
-            else:
-                columns_select = "classification, track_names, track_durations_sec, track_numbers, track_spotify_ids"
-                existing_row = only(
-                    read_rows(
-                        database.execute(
-                            f"""
-                    SELECT {columns_select} FROM certification
-                    WHERE sha256 = ? AND classification = ?
-                    """,
-                            (row[0], classification),
-                        ),
-                        columns_select,
-                    )
-                )
-                if existing_row:
-                    # TODO Properly append
-                    return subject
-                target_table = "certification"
-            database.execute(
-                f"INSERT INTO {target_table} VALUES {sql_array(row)}", row
-            )
+            _classify_project(subject.api, database, project, classification)
     return subject
 
 
@@ -257,9 +227,218 @@ def ss_season(subject: State, query: Query) -> State:
     return State(subject[0], out or subject[1], subject[2])
 
 
+def _classify_project(
+    api: Spotify, db: sql.Connection, proj: Mob, classification: str
+):
+    if proj["root_album"]["uri"] is None:
+        return
+    row = _classify_build_row(api, db, classification, proj)
+    if classification in RANKINGS:
+        row = _classify_rank(db, row)
+        target_table = "ranking"
+    else:
+        row = _classify_certify(db, row)
+        target_table = "certification"
+    if not row:
+        return
+    if row := _classify_single_check(db, row):
+        db.execute(f"INSERT INTO {target_table} VALUES {sql_array(row)}", row)
+
+
+def _classify_rank(db, row):
+    columns = "release_day, artist_names, name, classification, track_names, track_durations_sec, track_numbers, retrieved_time, artist_group, album_spotify_id, track_spotify_ids"
+    existing_row = only(
+        read_rows(
+            db.execute(
+                f"""
+            SELECT {columns} FROM ranking
+            WHERE release_day = ? AND artist_names = ? AND name = ?
+            """,
+                row[0:3],
+            ),
+            columns,
+        )
+    )
+    if (
+        existing_row
+        and existing_row[9] == row[9]
+        and existing_row[3] != row[3]
+        and len(existing_row[5]) - len(row[5]) < 4
+    ):
+        # Existing album (Spotify) ID matches and different ranking
+        # Also not removing a destructive # of songs
+        io_notify(f"*{row[2]}* by {row[1]} is being re-ranked")
+        db.execute(
+            """
+            DELETE FROM ranking
+            WHERE release_day = ? AND artist_names = ? AND name = ?
+            """,
+            row[0:3],
+        )
+    elif existing_row and existing_row[9] != row[9]:
+        # Album Spotify ID did not match
+        io_notify(f"*{row[2]}* by {row[1]} caused a conflict and was skipped")
+        return
+    elif existing_row:
+        return
+    return row
+
+
+def _classify_certify(db, row):
+    columns = "release_day, artist_names, name, classification, track_names, track_durations_sec, track_numbers, retrieved_time, artist_group, album_spotify_id, track_spotify_ids"
+    existing_row = only(
+        read_rows(
+            db.execute(
+                f"""
+            SELECT {columns} FROM certification
+            WHERE release_day = ? AND artist_names = ? AND name = ?
+                AND classification = ?
+            """,
+                row[0:4],
+            ),
+            columns,
+        )
+    )
+    if existing_row and existing_row[9] == row[9]:
+        for column in range(4, 7):
+            existing_row[column].append(row[column])
+        existing_row = existing_row[10].append(row[10])
+        db.execute(
+            """
+            DELETE FROM certification
+            WHERE release_day = ? AND artist_names = ? AND name = ?
+                AND classification = ?
+            """,
+            row[0:4],
+        )
+        row = existing_row
+    elif existing_row:
+        io_notify(f"*{row[2]}* by {row[1]} caused a conflict and was skipped")
+        return
+    return row
+
+
+def _classify_single_check(db, row):
+    columns = "release_day, artist_names, name, classification, track_names, track_durations_sec"
+    existing_projects = read_rows(
+        db.execute(
+            f"""
+        SELECT {columns} FROM ranking INNER JOIN helper_artist_group
+            ON helper_artist_group.artist_group = ranking.artist_group
+                AND helper_artist_group.artist_spotify_id = ?
+        """,
+            (strray2list(row[8])[0],),
+        ),
+        columns,
+    )
+    new_classification = row[3]
+    new_names, new_durations = map(strray2list, row[4:6])
+    new_durations = [timedelta(seconds=int(n)) for n in new_durations]
+    for (
+        ex_release,
+        ex_artists,
+        ex_name,
+        ex_classification,
+        ex_names,
+        ex_durations,
+    ) in existing_projects:
+        if _classify_is_single(
+            ex_names, ex_durations, new_names, new_durations
+        ):
+            # Existing is single of new
+            if new_classification in RANKINGS and RANKINGS.index(
+                new_classification
+            ) >= RANKINGS.index(ex_classification):
+                _classify_delete_single(db, ex_release, ex_artists, ex_name)
+                continue
+            _classify_store_single(
+                db,
+                single_release_day=ex_release,
+                artist_names=ex_artists,
+                single_name=ex_name,
+                album_release_day=row[0],
+                album_name=row[2],
+                single_track_names=ex_names,
+                album_track_names=new_names,
+            )
+        elif _classify_is_single(
+            new_names, new_durations, ex_names, ex_durations
+        ):
+            # New is single of existing
+            if new_classification in RANKINGS and RANKINGS.index(
+                ex_classification
+            ) >= RANKINGS.index(new_classification):
+                return
+            _classify_store_single(
+                db,
+                *row[:3],
+                album_release_day=ex_release,
+                album_name=ex_name,
+                single_track_names=new_names,
+                album_track_names=ex_names,
+            )
+        else:
+            continue
+    return row
+
+
+def _classify_store_single(
+    database,
+    single_release_day,
+    artist_names,
+    single_name,
+    album_release_day,
+    album_name,
+    single_track_names,
+    album_track_names,
+):
+    database.execute(
+        f"INSERT INTO helper_single VALUES {sql_array(range(7))}",
+        (
+            single_release_day,
+            list2strray(artist_names),
+            single_name,
+            album_release_day,
+            album_name,
+            list2strray(single_track_names),
+            list2strray(album_track_names),
+        ),
+    )
+
+
+def _classify_delete_single(database, release, artist_names, name):
+    database.execute(
+        "DELETE FROM ranking WHERE release_day = ? AND artist_names = ? AND name = ?",
+        (release, list2strray(artist_names), name),
+    )
+
+
+def _classify_is_single(
+    single_names: Sequence[str],
+    single_durations: Sequence[timedelta],
+    album_names: Sequence[str],
+    album_durations: Sequence[timedelta],
+) -> bool:
+    for name in single_names:
+        if (
+            name not in album_names
+            or abs(
+                (
+                    album_durations[album_names.index(name)]
+                    - single_durations[single_names.index(name)]
+                ).seconds
+            )
+            > 5
+        ):
+            break
+    else:
+        return True
+    return False
+
+
 def _classify_build_row(
     api: Spotify, db: sql.Connection, classification: str, project: Mob
-) -> tuple[bytes, date, str, str, str, str, str, str, datetime, str, str, str]:
+) -> tuple[date, str, str, str, str, str, str, datetime, str, str, str]:
     album = cast(Mob, api.album(project["root_album"]["uri"]))
     retrieved_time = datetime.now()
 
@@ -274,9 +453,6 @@ def _classify_build_row(
     artist_names, artist_group = map(list2strray, zip(*artist_zip))
     _classify_store_artist_group(db, artist_group, artist_zip)
     name = cast(str, project["name"])
-    hash_digest = sha256(
-        bytes(release_day.isoformat() + artist_names + name, SHA256_ENCODING)
-    ).digest()
     included_track_ids = [t["id"] for t in project["objects"]]
     track_names, track_durations_sec, track_numbers, track_spotify_ids = map(
         list2strray,
@@ -297,7 +473,6 @@ def _classify_build_row(
     )
     album_spotify_id = cast(str, album["id"])
     return (
-        hash_digest,
         release_day,
         artist_names,
         name,
@@ -651,21 +826,23 @@ def _season_retrieve_rows(
         f"""
         SELECT DISTINCT {columns.strip(';').format(target_table)}
         FROM {target_table} LEFT JOIN certification AS exclusion
-            ON {target_table}.sha256 = exclusion.sha256
+            ON {target_table}.release_day = exclusion.release_day
+                AND {target_table}.artist_names = exclusion.artist_names
+                AND {target_table}.name = exclusion.name
                 AND exclusion.classification
                     IN {sql_array(exclusion_certifications)}
             LEFT JOIN helper_artist_score
             ON {target_table}.artist_group=helper_artist_score.artist_group
                 AND {target_table}.release_day=helper_artist_score.date_from
-        WHERE {target_table}.sha256 NOT IN (
-            SELECT helper_single.single_hash
-            FROM helper_single INNER JOIN {target_table}
-                ON {target_table}.sha256 = helper_single.album_hash
-            WHERE {target_table}.classification IN {sql_array(classifications)}
-            AND {target_table}.release_day >= ?
-            AND {target_table}.release_day < ?
-            AND exclusion.classification IS NULL
-        )
+            LEFT JOIN helper_single
+            ON helper_single.single_release_day = {target_table}.release_day
+                AND helper_single.artist_names = {target_table}.artist_names
+                AND helper_single.single_name = {target_table}.name
+                AND helper_single.album_track_names IN (
+                    SELECT {target_table}.track_names FROM {target_table}
+                    WHERE classification IN {sql_array(classifications)}
+                )
+        WHERE helper_single.album_track_names IS NULL
             AND {target_table}.classification IN {sql_array(classifications)}
             AND {target_table}.release_day >= ?
             AND {target_table}.release_day < ?
@@ -675,8 +852,6 @@ def _season_retrieve_rows(
         (
             *exclusion_certifications,
             *classifications,
-            start_date,
-            stop_date,
             *classifications,
             start_date,
             stop_date,
