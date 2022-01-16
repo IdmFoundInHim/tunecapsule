@@ -12,7 +12,8 @@ from ._constants import DB_DIRECTORY, DB_LOCATION
 
 def initialize_database():
     try:
-        os.makedirs(DB_DIRECTORY)
+        if DB_DIRECTORY:
+            os.makedirs(DB_DIRECTORY, exist_ok=True)
     except FileExistsError:
         pass
     CLASSIFICATION_TABLE_TEMPLATE = """
