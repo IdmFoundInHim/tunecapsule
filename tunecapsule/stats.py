@@ -120,7 +120,7 @@ def snapshot_artist_score(
 
     To find the score, sort all known projects of an artist in reverse
     chronological order. Starting with the most recent project, extend
-    the range further back in time while 1) no C- or E-ranked
+    the range as far back in time such that 1) no C- or E-ranked
     projects are included and 2) at least 70% of the playtime included
     is on an A ranked project. Once the range has been established,
     calculate the total duration of the projects in minutes to find the
@@ -135,19 +135,25 @@ def snapshot_artist_score(
             ON ranking.artist_group = helper_artist_group.artist_group
                 AND helper_artist_group.artist_spotify_id = ?
         WHERE ranking.release_day <= ?
+        ORDER BY ranking.release_day DESC
         """,
             (spotify_artist_id, simulated_date),
         ),
         columns,
     )
     durations = {"A": timedelta(0), "B": timedelta(0)}
+    project_duration_seconds = durations.copy()
     for classification, track_durations_seconds in table:
         if classification not in durations:
             break
-        project_duration_seconds = sum(track_durations_seconds, timedelta(0))
-        durations[classification] += project_duration_seconds
-        if durations["A"] / (durations["A"] + durations["B"]) < 0.7:
-            durations[classification] -= project_duration_seconds
+        project_duration_seconds[classification] += sum(
+            track_durations_seconds, timedelta(0)
+        )
+        seconds_a = durations["A"] + project_duration_seconds["A"]
+        seconds_b = durations["B"] + project_duration_seconds["B"]
+        if seconds_a / (seconds_a + seconds_b) > 0.7:
+            durations = {"A": seconds_a, "B": seconds_b}
+            project_duration_seconds = {"A": timedelta(0), "B": timedelta(0)}
     return (durations["A"] + durations["B"]) / timedelta(minutes=1)
 
 
