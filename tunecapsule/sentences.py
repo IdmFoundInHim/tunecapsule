@@ -232,12 +232,19 @@ def _classify_project(
         row = _classify_rank(db, row)
         target_table = "ranking"
     else:
-        row = _classify_certify(db, row)
+        row = _classify_certify(api, db, row)
         target_table = "certification"
     if not row:
         return
-    if row := _classify_single_check(db, row):
-        db.execute(f"INSERT INTO {target_table} VALUES {sql_array(row)}", row)
+    db.execute(
+        f"INSERT INTO {target_table} VALUES {sql_array(row)}",
+        (
+            *row[0:4],
+            *map(list2strray, (row[4], [d.seconds for d in row[5]], row[6])),
+            *row[7:10],
+            list2strray(row[10]),
+        ),
+    )
 
 
 def _classify_rank(db, row):
@@ -276,10 +283,10 @@ def _classify_rank(db, row):
         return
     elif existing_row:
         return
-    return row
+    return _classify_single_check(db, row)
 
 
-def _classify_certify(db, row):
+def _classify_certify(api, db, row):
     columns = "release_day, artist_names, name, classification, track_names, track_durations_sec, track_numbers, retrieved_time, artist_group, album_spotify_id, track_spotify_ids"
     existing_row = only(
         read_rows(
@@ -297,7 +304,7 @@ def _classify_certify(db, row):
     if existing_row and existing_row[9] == row[9]:
         for column in range(4, 7):
             existing_row[column].append(row[column])
-        existing_row = existing_row[10].append(row[10])
+        all_track_ids = existing_row[10] + row[10]
         db.execute(
             """
             DELETE FROM certification
@@ -306,7 +313,18 @@ def _classify_certify(db, row):
             """,
             row[0:4],
         )
-        row = existing_row
+        row = _classify_build_row(
+            api,
+            db,
+            row[3],
+            Mob(
+                {
+                    "name": row[2],
+                    "root_album": {"uri": f"spotify:album:{row[9]}"},
+                    "objects": [{"id": id} for id in all_track_ids],
+                }
+            ),
+        )
     elif existing_row:
         io_notify(f"*{row[2]}* by {row[1]} caused a conflict and was skipped")
         return
@@ -327,8 +345,7 @@ def _classify_single_check(db, row):
         columns,
     )
     new_classification = row[3]
-    new_names, new_durations = map(strray2list, row[4:6])
-    new_durations = [timedelta(seconds=int(n)) for n in new_durations]
+    new_names, new_durations = row[4:6]
     for (
         ex_release,
         ex_artists,
@@ -379,19 +396,19 @@ def _classify_single_check(db, row):
 
 def _classify_store_single(
     database,
-    single_release_day,
-    artist_names,
-    single_name,
-    album_release_day,
-    album_name,
-    single_track_names,
-    album_track_names,
+    single_release_day: date,
+    artist_names: str,
+    single_name: str,
+    album_release_day: date,
+    album_name: str,
+    single_track_names: list[str],
+    album_track_names: list[str],
 ):
     database.execute(
         f"INSERT INTO helper_single VALUES {sql_array(range(7))}",
         (
             single_release_day,
-            list2strray(artist_names),
+            artist_names,
             single_name,
             album_release_day,
             album_name,
@@ -419,9 +436,9 @@ def _classify_is_single(
             name not in album_names
             or abs(
                 (
-                    album_durations[album_names.index(name)]
-                    - single_durations[single_names.index(name)]
-                ).seconds
+                    album_durations[album_names.index(name)].seconds
+                    - single_durations[single_names.index(name)].seconds
+                )
             )
             > 5
         ):
@@ -433,7 +450,19 @@ def _classify_is_single(
 
 def _classify_build_row(
     api: Spotify, db: sql.Connection, classification: str, project: Mob
-) -> tuple[date, str, str, str, str, str, str, datetime, str, str, str]:
+) -> tuple[
+    date,
+    str,
+    str,
+    str,
+    list[str],
+    list[timedelta],
+    list[int],
+    datetime,
+    str,
+    str,
+    list[str],
+]:
     album = cast(Mob, api.album(project["root_album"]["uri"]))
     retrieved_time = datetime.now()
 
@@ -447,25 +476,31 @@ def _classify_build_row(
     artist_zip = sorted((a["name"], a["id"]) for a in album["artists"])
     artist_names, artist_group = map(list2strray, zip(*artist_zip))
     _classify_store_artist_group(db, artist_group, artist_zip)
-    name = cast(str, project["name"])
+    name = cast(str, album["name"])
     included_track_ids = [t["id"] for t in project["objects"]]
-    track_names, track_durations_sec, track_numbers, track_spotify_ids = map(
-        list2strray,
-        zip(
-            *[
-                (
-                    t["name"],
-                    t["duration_ms"] // 1000,
-                    t["track_number"],
-                    t["id"],
-                )
-                for t in results_generator(
-                    cast(SpotifyPKCE, api.auth_manager), album["tracks"]
-                )
-                if t["id"] in included_track_ids
-            ]
-        ),
+    tracks = [
+        (
+            t["name"],
+            t["duration_ms"],
+            t["track_number"],
+            t["id"],
+        )
+        for t in results_generator(
+            cast(SpotifyPKCE, api.auth_manager), album["tracks"]
+        )
+        if t["id"] in included_track_ids
+    ]
+    track_names, track_durations_sec, track_numbers, track_spotify_ids = (
+        [],
+        [],
+        [],
+        [],
     )
+    for track in tracks:
+        track_names.append(str(track[0]))
+        track_durations_sec.append(timedelta(milliseconds=track[1]))
+        track_numbers.append(int(track[2]))
+        track_spotify_ids.append(str(track[3]))
     album_spotify_id = cast(str, album["id"])
     return (
         release_day,
