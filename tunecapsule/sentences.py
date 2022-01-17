@@ -366,7 +366,7 @@ def _classify_single_check(db, row):
             _classify_store_single(
                 db,
                 single_release_day=ex_release,
-                artist_names=ex_artists,
+                artist_names=list2strray(ex_artists),
                 single_name=ex_name,
                 album_release_day=row[0],
                 album_name=row[2],
