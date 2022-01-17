@@ -17,11 +17,11 @@ RANK_VALUE = {
     "C": 0.2,
 }
 CERT_VALUE = {
-    "💿": lambda tracks: _c_score_standard_certification_value(
+    "collect": lambda tracks: _c_score_standard_certification_value(
         75.0, "A", tracks
     ),
-    "🖌": lambda tracks: len(tracks) * 10,
-    "🔂": lambda tracks: len(tracks) * 4.2,
+    "master": lambda tracks: len(tracks) * 10,
+    "repeat1": lambda tracks: len(tracks) * 4.2,
 }
 
 
