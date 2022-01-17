@@ -23,6 +23,6 @@ var/
 env/
 
 .cache/
-*tunecapsule.db
+*tunecapsule*.db*
 
 .notes*

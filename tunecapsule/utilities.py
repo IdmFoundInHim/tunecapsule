@@ -53,8 +53,11 @@ def read_rows(cursor: sqlite3.Cursor, columns: str) -> Iterator[tuple]:
         DB_COLUMNS[name.strip().split(".")[-1]]
         for name in columns.split(",")
     ]
-    while row := cursor.fetchone():
-        yield tuple(parser(column) for column, parser in zip(row, parsers))
+    for row in iter(cursor.fetchone, None):
+        yield tuple(
+            parser(column) if column else None
+            for column, parser in zip(row, parsers)
+        )
 
 
 def beginning_year(year: int):
