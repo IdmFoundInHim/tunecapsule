@@ -524,7 +524,7 @@ def _classify_parse_release(release_date):
                 release_day = date(int(yr), int(mo), int(da))
             case yr, mo:
                 release_day = date(
-                    int(yr), int(mo), calendar.monthrange(yr, mo)[1]
+                    int(yr), int(mo), calendar.monthrange(int(yr), int(mo))[1]
                 )
             case yr,:
                 release_day = end_year(int(yr))
@@ -566,6 +566,7 @@ def _season_upload(
         classification,
         start_date,
         stop_date,
+        _season_verify_exclusions(classification)
     ):
         store_artist_group_score(db, artist_group, release_day)
     season = _season_retrieve_tracks(db, classification, start_date, stop_date)
@@ -825,6 +826,7 @@ def _season_retrieve_tracks(
             classification,
             start_date,
             stop_date,
+            _season_verify_exclusions(classification)
         )
     )
 
@@ -948,3 +950,6 @@ def _season_transmit_projects(
     for song_chunk in chunked(season, 100):
         spotify.playlist_add_items(playlist_id, song_chunk)
     return cast(Mob, spotify.playlist(playlist_id))
+
+def _season_verify_exclusions(classification: str):
+    return EXCLUSION_CERTIFICATIONS - set(strray2list(classification))
