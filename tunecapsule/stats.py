@@ -20,7 +20,7 @@ CERT_VALUE = {
     "collect": lambda tracks: _c_score_standard_certification_value(
         75.0, "A", tracks
     ),
-    "master": lambda tracks: len(tracks) * 10,
+    "masterpiece": lambda tracks: len(tracks) * 10,
     "repeat1": lambda tracks: len(tracks) * 4.2,
 }
 

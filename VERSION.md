@@ -7,7 +7,7 @@ Requires the following tested functionality:
 * Complete `classify` and `season` functionality
 * `classify`, `season`, and statistics support A, B, C, and E rankings
 * `classify` and `season` support arbitrary certifications
-* Statistics support 🖌, 🔂, and 💿 certifications
+* Statistics support MASTERPIECE, COLLECT, and REPEAT1 certifications
 
 ## 0.8.0
 

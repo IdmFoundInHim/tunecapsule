@@ -163,7 +163,7 @@ def ss_season(subject: State, query: Query) -> State:
             out = _season_upload(
                 subject.api,
                 db,
-                classification,
+                list2strray(classification.split()),
                 cast(date, target["start_date"]),
                 cast(date, target["stop_date"]),
                 cast(str, target["playlist_spotify_id"]),
@@ -175,7 +175,7 @@ def ss_season(subject: State, query: Query) -> State:
             out = _season_upload(
                 subject.api,
                 db,
-                classification,
+                list2strray(classification.split()),
                 None,
                 None,
                 cast(str, target["playlist_spotify_id"]),
@@ -199,7 +199,7 @@ def ss_season(subject: State, query: Query) -> State:
             out = _season_create(
                 subject.api,
                 db,
-                classification,
+                list2strray(classification.split()),
                 start_date,
                 end_date,
                 playlist_id,
@@ -209,7 +209,7 @@ def ss_season(subject: State, query: Query) -> State:
             out = _season_create(
                 subject.api,
                 db,
-                classification,
+                list2strray(classification.split()),
                 None,
                 None,
                 playlist_id,
