@@ -77,3 +77,4 @@ def initialize_database():
         );
         """
         )
+        database.commit()
