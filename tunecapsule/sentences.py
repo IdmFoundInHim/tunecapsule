@@ -111,8 +111,8 @@ def ss_season(subject: State, query: Query) -> State:
     For example, "season 2020 3" would hold about 80 songs from the
     middle of 2020 that were ranked A or B. Meanwhile, "season 2020 B"
     would hold however many songs were ranked B from 2020, but none
-    ranked A. "season 2020 C 🔂" would include C-ranked songs from 2020
-    as well as 🔂-certified songs from that year.
+    ranked A. "season 2020 C MASTERPIECE" would include C-ranked songs from 2020
+    as well as "Masterpiece"-certified songs from that year.
 
     The location of the playlist on Spotify will also be saved in the
     database alongside the selected classifications. This allows later
@@ -152,7 +152,7 @@ def ss_season(subject: State, query: Query) -> State:
             out = _season_update_year(subject.api, db, year)
         case "update", (min_year, max_year):
             out = _season_update_years(subject.api, db, min_year, max_year)
-        case "update",:
+        case "update",:  # TODO seems broken
             out = _season_update_years(subject.api, db, *NULL_YEAR_RANGE)
         case "update", (min_year, max_year), classification if isinstance(
             classification, int | str
@@ -951,5 +951,5 @@ def _season_transmit_projects(
         spotify.playlist_add_items(playlist_id, song_chunk)
     return cast(Mob, spotify.playlist(playlist_id))
 
-def _season_verify_exclusions(classification: str):
-    return EXCLUSION_CERTIFICATIONS - set(strray2list(classification))
+def _season_verify_exclusions(classification: int | str):
+    return EXCLUSION_CERTIFICATIONS - set(strray2list(str(classification)))
