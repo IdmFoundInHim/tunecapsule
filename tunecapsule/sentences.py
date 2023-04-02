@@ -238,7 +238,7 @@ def ss_score(subject: State, query: Query) -> State:
             rows = database.execute("SELECT classification FROM ranking WHERE album_spotify_id = ?", (mob['id'],))
             try:
                 io_notify(rows.fetchone()[0])
-            except IndexError as err:
+            except TypeError as err:
                 raise NoResultsError from err
     database.close()
     return State(subject[0], mob, subject[2])
