@@ -235,7 +235,7 @@ def ss_score(subject: State, query: Query) -> State:
         case 'artist':
             io_notify(overall_artist_score(database, mob['id'], None))
         case 'album':
-            rows = database.execute("SELECT classification FROM ranking WHERE album_spotify_id = ?", mob['id'])
+            rows = database.execute("SELECT classification FROM ranking WHERE album_spotify_id = ?", (mob['id'],))
             try:
                 io_notify(rows.fetchone()[0])
             except IndexError as err:
