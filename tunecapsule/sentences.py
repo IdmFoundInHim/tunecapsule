@@ -230,16 +230,17 @@ def ss_score(subject: State, query: Query) -> State:
         mob = ss_open(subject, query).mob
     else:
         mob = subject.mob
+    database = sql.connect(DB_LOCATION)
     match mob['type']:
         case 'artist':
-            io_notify(overall_artist_score(subject.api, mob['id'], None))
+            io_notify(overall_artist_score(database, mob['id'], None))
         case 'album':
-            with sql.connect(DB_LOCATION) as database:
-                rows = database.execute("SELECT classification FROM ranking WHERE album_spotify_id = ?", mob['id'])
-                try:
-                    io_notify(rows.fetchone()[0])
-                except IndexError as err:
-                    raise NoResultsError from err
+            rows = database.execute("SELECT classification FROM ranking WHERE album_spotify_id = ?", mob['id'])
+            try:
+                io_notify(rows.fetchone()[0])
+            except IndexError as err:
+                raise NoResultsError from err
+    database.close()
     return State(mob, subject[1], subject[2])
 
 
