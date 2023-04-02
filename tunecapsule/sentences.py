@@ -788,7 +788,7 @@ def _season_retrieve_metadata(
     rows = read_rows(
         db.execute(
             f"""
-        SELECT * FROM season
+        SELECT {columns} FROM season
         WHERE classification = ? 
             AND (min_year = ? {min_check})
             AND (max_year = ? {max_check})
@@ -861,7 +861,7 @@ def _season_retrieve_rows(
     start_date, stop_date = start_date or date.min, stop_date or date.max
     cursor = db.execute(
         f"""
-        SELECT DISTINCT {columns.strip(';').format(target_table)}
+        SELECT DISTINCT {columns.replace(';', '').format(target_table)}
         FROM {target_table} LEFT JOIN certification AS exclusion
             ON {target_table}.release_day = exclusion.release_day
                 AND {target_table}.artist_names = exclusion.artist_names
