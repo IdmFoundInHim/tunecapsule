@@ -39,6 +39,7 @@ def cumulative_artist_score(
 
     All other projects are considered albums and will be scored at the calculated value times the ranking point value (1.8, 1.0, or 0.2). Albums recieve a base value plus up to two length bonuses. The base value is the duration of the album divided by the general average duration of a song, fixed at 3 min 30 sec. All albums below 63 minutes (but at least 15 minutes) recieve a 1 point value bonus, and all albums at least 30 minutes recieve a seperate 1 point value bonus. In other words, albums from 30 minutes to below 63 minutes recieve two bonus value points, while all other albums recieve one bonus value point.
     """
+    simulated_date = simulated_date or date.today()
     columns = "classification, track_durations_sec"
     rankings = read_rows(
         db.execute(
@@ -127,6 +128,7 @@ def snapshot_artist_score(
     score.
     ----------------------
     """
+    simulated_date = simulated_date or date.today()
     columns = "classification, track_durations_sec"
     table = read_rows(
         db.execute(
@@ -161,6 +163,7 @@ def overall_artist_score(
     db: sql.Connection, spotify_artist_id: str, simulated_date: date | None
 ) -> float:
     """Combines artist scores into a unified score"""
+    simulated_date = simulated_date or date.today()
     return cumulative_artist_score(
         db, spotify_artist_id, simulated_date
     ) + snapshot_artist_score(db, spotify_artist_id, simulated_date)

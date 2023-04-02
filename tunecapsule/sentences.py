@@ -241,7 +241,7 @@ def ss_score(subject: State, query: Query) -> State:
             except IndexError as err:
                 raise NoResultsError from err
     database.close()
-    return State(mob, subject[1], subject[2])
+    return State(subject[0], mob, subject[2])
 
 
 def _classify_project(
