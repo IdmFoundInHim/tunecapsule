@@ -232,7 +232,7 @@ def ss_score(subject: State, query: Query) -> State:
         mob = subject.mob
     match mob['type']:
         case 'artist':
-            io_notify(overall_artist_score(subject.api, mob['id']))
+            io_notify(overall_artist_score(subject.api, mob['id'], None))
         case 'album':
             with sql.connect(DB_LOCATION) as database:
                 rows = database.execute("SELECT classification FROM ranking WHERE album_spotify_id = ?", mob['id'])
