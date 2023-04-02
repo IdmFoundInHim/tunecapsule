@@ -2,7 +2,7 @@
 
 Copyright (c) 2021 IdmFoundInHim, under MIT License
 """
-__all__ = ["ss_classify", "ss_season"]
+__all__ = ["ss_classify", "ss_season", "ss_score"]
 
 import calendar
 import sqlite3 as sql
@@ -23,7 +23,7 @@ from streamsort import (
     ss_new,
     ss_remove,
     state_only_api,
-    str_mob,
+    str_mob, ss_open,
 )
 from streamsort.types import Mob, Query, State
 
@@ -37,7 +37,7 @@ from ._constants import (
     SEASON_KEYWORDS,
     SPOTIFY_DATE_DELIMITER,
 )
-from .stats import store_artist_group_score
+from .stats import store_artist_group_score, overall_artist_score
 from .utilities import (
     autoseason_name,
     beginning_year,
@@ -220,6 +220,27 @@ def ss_season(subject: State, query: Query) -> State:
     db.commit()
     db.close()
     return State(subject[0], out or subject[1], subject[2])
+
+
+def ss_score(subject: State, query: Query) -> State:
+    """Retrieves classifications for a projectss
+
+    Work in progress. Currently, supports overall artist scores and album rankings."""
+    if query:
+        mob = ss_open(subject, query).mob
+    else:
+        mob = subject.mob
+    match mob['type']:
+        case 'artist':
+            io_notify(overall_artist_score(subject.api, mob['id']))
+        case 'album':
+            with sql.connect(DB_LOCATION) as database:
+                rows = database.execute("SELECT classification FROM ranking WHERE album_spotify_id = ?", mob['id'])
+                try:
+                    io_notify(rows.fetchone()[0])
+                except IndexError as err:
+                    raise NoResultsError from err
+    return State(mob, subject[1], subject[2])
 
 
 def _classify_project(
