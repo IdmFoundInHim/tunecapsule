@@ -10,4 +10,4 @@ __all__ = ["_sentences_"] + sentences__all__ + stats__all__
 
 from .sentences import *
 
-_sentences_ = {"classify": ss_classify, "season": ss_season}
+_sentences_ = {"classify": ss_classify, "season": ss_season, "score": ss_score}
