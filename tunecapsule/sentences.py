@@ -15,6 +15,7 @@ from more_itertools import chunked, flatten, only, prepend
 from projects import ss_projects
 from spotipy import Spotify, SpotifyPKCE
 from streamsort import (
+    IO_CONFIRM as io_confirm,
     IO_NOTIFY as io_notify,
     NoResultsError,
     UnexpectedResponseException,
@@ -86,8 +87,14 @@ def ss_classify(subject: State, query: Query) -> State:
         if classification.isnumeric():
             raise UnsupportedQueryError("classify", cast(str, query))
             # raise UnsupportedQueryError("Classification cannot be numeric")
-        with sql.connect(DB_LOCATION) as database:
-            _classify_project(subject.api, database, project, classification)
+        try:
+            with sql.connect(DB_LOCATION) as database:
+                _classify_project(subject.api, database, project, classification)
+        except UnexpectedResponseException as err:
+            io_notify(f'Unexpected Response')
+            for line in err.args:
+                io_notify(f'    {line}')
+            io_notify(f'Could not classify "{project['name']}"')
     return subject
 
 
@@ -571,7 +578,22 @@ def _classify_store_artist_group(
                 (artist_group, *artist),
             )
         return
-    assert set(existing_rows) == set(artists)
+    # The rest is conflict resolution
+    if set(existing_rows) != set(artists):
+        if len(existing_rows) == len(artists):
+            UnexpectedResponseException("Artist name has changed")
+        old = {t[1]: t[0] for t in existing_rows}
+        new = {t[1]: t[0] for t in artists}
+        for artist_spotify_id in old:
+            if old[artist_spotify_id] != new[artist_spotify_id]:
+                if io_confirm(f'Rename {old[artist_spotify_id]} to {new[artist_spotify_id]}? '):
+                    db.execute("UPDATE ranking SET artist_names = replace(artist_names, ?, ?) WHERE artist_names LIKE '%' || ? || '%'", (old[artist_spotify_id], new[artist_spotify_id], old[artist_spotify_id]))
+                    db.execute("UPDATE certification SET artist_names = replace(artist_names, ?, ?) WHERE artist_names LIKE '%' || ? || '%'", (old[artist_spotify_id], new[artist_spotify_id], old[artist_spotify_id]))
+                    db.execute("UPDATE helper_artist_group SET artist_name = ? WHERE artist_spotify_id = ?", (new[artist_spotify_id], artist_spotify_id))
+                    io_notify('Done')
+                else:
+                    raise UnexpectedResponseException("Artist name has changed")
+
 
 
 def _season_upload(
