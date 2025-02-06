@@ -1,11 +1,11 @@
-""" Utility functions for TuneCapsule
+"""Utility functions for TuneCapsule
 
 Copyright (c) 2021 IdmFoundInHim, under MIT License
 """
+
+import sqlite3
 from collections.abc import Callable, Collection, Iterable, Iterator
 from datetime import date, datetime, timedelta
-import sqlite3
-from typing import cast
 
 from ._constants import DB_STRRAY_DELIMITER
 

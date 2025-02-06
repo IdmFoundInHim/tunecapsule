@@ -1,7 +1,8 @@
-""" TuneCapsule for StreamSort
+"""TuneCapsule for StreamSort
 
 Copyright (c) 2021 IdmFoundInHim, under MIT License
 """
+
 # pyright: reportUnsupportedDunderAll=false
 from .sentences import __all__ as sentences__all__
 from .stats import __all__ as stats__all__

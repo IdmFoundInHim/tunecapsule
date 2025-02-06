@@ -1,7 +1,8 @@
-""" Database Initializer for TuneCapsule
+"""Database Initializer for TuneCapsule
 
 Copyright (c) 2021 IdmFoundInHim, under MIT License
 """
+
 import os
 import sqlite3
 import sys

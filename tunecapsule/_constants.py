@@ -1,9 +1,10 @@
-""" Package-level Constants for TuneCapsule
+"""Package-level Constants for TuneCapsule
 
 Scoring parameters are found in the `stats` module
 
 Copyright (c) 2021 IdmFoundInHim, under MIT License
 """
+
 __all__ = ["DB_DIRECTORY", "DB_LOCATION"]
 
 import os

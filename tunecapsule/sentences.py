@@ -1,7 +1,8 @@
-""" TuneCapsule extensions for StreamSort 
+"""TuneCapsule extensions for StreamSort
 
 Copyright (c) 2021 IdmFoundInHim, under MIT License
 """
+
 __all__ = ["ss_classify", "ss_season", "ss_score"]
 
 import calendar
@@ -24,7 +25,8 @@ from streamsort import (
     ss_new,
     ss_remove,
     state_only_api,
-    str_mob, ss_open,
+    str_mob,
+    ss_open,
 )
 from streamsort.types import Mob, Query, State
 
@@ -33,7 +35,6 @@ from ._constants import (
     DB_LOCATION,
     EXCLUSION_CERTIFICATIONS,
     IDEAL_AUTOSEASON_LENGTH,
-    MAX_AUTOSEASON,
     RANKINGS,
     SEASON_KEYWORDS,
     SPOTIFY_DATE_DELIMITER,
@@ -89,11 +90,13 @@ def ss_classify(subject: State, query: Query) -> State:
             # raise UnsupportedQueryError("Classification cannot be numeric")
         try:
             with sql.connect(DB_LOCATION) as database:
-                _classify_project(subject.api, database, project, classification)
+                _classify_project(
+                    subject.api, database, project, classification
+                )
         except UnexpectedResponseException as err:
-            io_notify(f'Unexpected Response')
+            io_notify(f"Unexpected Response")
             for line in err.args:
-                io_notify(f'    {line}')
+                io_notify(f"    {line}")
             io_notify(f'Could not classify "{project['name']}"')
     return subject
 
@@ -232,17 +235,21 @@ def ss_season(subject: State, query: Query) -> State:
 def ss_score(subject: State, query: Query) -> State:
     """Retrieves classifications for a projectss
 
-    Work in progress. Currently, supports overall artist scores and album rankings."""
+    Work in progress. Currently, supports overall artist scores and album rankings.
+    """
     if query:
         mob = ss_open(subject, query).mob
     else:
         mob = subject.mob
     database = sql.connect(DB_LOCATION)
-    match mob['type']:
-        case 'artist':
-            io_notify(overall_artist_score(database, mob['id'], None))
-        case 'album':
-            rows = database.execute("SELECT classification FROM ranking WHERE album_spotify_id = ?", (mob['id'],))
+    match mob["type"]:
+        case "artist":
+            io_notify(overall_artist_score(database, mob["id"], None))
+        case "album":
+            rows = database.execute(
+                "SELECT classification FROM ranking WHERE album_spotify_id = ?",
+                (mob["id"],),
+            )
             try:
                 io_notify(rows.fetchone()[0])
             except TypeError as err:
@@ -586,14 +593,34 @@ def _classify_store_artist_group(
         new = {t[1]: t[0] for t in artists}
         for artist_spotify_id in old:
             if old[artist_spotify_id] != new[artist_spotify_id]:
-                if io_confirm(f'Rename {old[artist_spotify_id]} to {new[artist_spotify_id]}? '):
-                    db.execute("UPDATE ranking SET artist_names = replace(artist_names, ?, ?) WHERE artist_names LIKE '%' || ? || '%'", (old[artist_spotify_id], new[artist_spotify_id], old[artist_spotify_id]))
-                    db.execute("UPDATE certification SET artist_names = replace(artist_names, ?, ?) WHERE artist_names LIKE '%' || ? || '%'", (old[artist_spotify_id], new[artist_spotify_id], old[artist_spotify_id]))
-                    db.execute("UPDATE helper_artist_group SET artist_name = ? WHERE artist_spotify_id = ?", (new[artist_spotify_id], artist_spotify_id))
-                    io_notify('Done')
+                if io_confirm(
+                    f"Rename {old[artist_spotify_id]} to {new[artist_spotify_id]}? "
+                ):
+                    db.execute(
+                        "UPDATE ranking SET artist_names = replace(artist_names, ?, ?) WHERE artist_names LIKE '%' || ? || '%'",
+                        (
+                            old[artist_spotify_id],
+                            new[artist_spotify_id],
+                            old[artist_spotify_id],
+                        ),
+                    )
+                    db.execute(
+                        "UPDATE certification SET artist_names = replace(artist_names, ?, ?) WHERE artist_names LIKE '%' || ? || '%'",
+                        (
+                            old[artist_spotify_id],
+                            new[artist_spotify_id],
+                            old[artist_spotify_id],
+                        ),
+                    )
+                    db.execute(
+                        "UPDATE helper_artist_group SET artist_name = ? WHERE artist_spotify_id = ?",
+                        (new[artist_spotify_id], artist_spotify_id),
+                    )
+                    io_notify("Done")
                 else:
-                    raise UnexpectedResponseException("Artist name has changed")
-
+                    raise UnexpectedResponseException(
+                        "Artist name has changed"
+                    )
 
 
 def _season_upload(
@@ -610,7 +637,7 @@ def _season_upload(
         classification,
         start_date,
         stop_date,
-        _season_verify_exclusions(classification)
+        _season_verify_exclusions(classification),
     ):
         store_artist_group_score(db, artist_group, release_day)
     season = _season_retrieve_tracks(db, classification, start_date, stop_date)
@@ -807,13 +834,13 @@ def _season_parse_query(query: str) -> Iterator[SeasonQueryGroup]:
 
 def _season_parse_token(token: str) -> SeasonQueryGroup:
     match token.split("-"):
-        case min, max if len(max) == 2 and len(
-            min
-        ) == 4 and max.isdigit() and min.isdigit():
+        case min, max if (
+            len(max) == 2 and len(min) == 4 and max.isdigit() and min.isdigit()
+        ):
             return (int(min), int(min[:2] + max))
-        case min, max if len(max) == 4 and len(
-            min
-        ) == 4 and max.isdigit() and min.isdigit():
+        case min, max if (
+            len(max) == 4 and len(min) == 4 and max.isdigit() and min.isdigit()
+        ):
             return (int(min), int(max))
         case yr, if yr.isdigit() and len(yr) == 4:
             return cast(tuple[int, int], (int(yr),) * 2)
@@ -870,7 +897,7 @@ def _season_retrieve_tracks(
             classification,
             start_date,
             stop_date,
-            _season_verify_exclusions(classification)
+            _season_verify_exclusions(classification),
         )
     )
 
@@ -994,6 +1021,7 @@ def _season_transmit_projects(
     for song_chunk in chunked(season, 100):
         spotify.playlist_add_items(playlist_id, song_chunk)
     return cast(Mob, spotify.playlist(playlist_id))
+
 
 def _season_verify_exclusions(classification: int | str):
     return EXCLUSION_CERTIFICATIONS - set(strray2list(str(classification)))

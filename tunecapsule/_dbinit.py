@@ -1,7 +1,8 @@
-""" Database Configuration for TuneCapsule
+"""Database Configuration for TuneCapsule
 
 Copyright (c) 2021 IdmFoundInHim, under MIT License
 """
+
 __all__ = ["initialize_database"]
 
 import os

@@ -1,10 +1,11 @@
-""" Statistical algorithms for TuneCapsule
+"""Statistical algorithms for TuneCapsule
 
 Copyright (c) 2021 IdmFoundInHim, under MIT License
 """
+
 import sqlite3 as sql
-from datetime import date, timedelta
 from collections.abc import Iterable
+from datetime import date, timedelta
 
 from .utilities import list2strray, read_rows, sql_array
 
@@ -54,7 +55,8 @@ def cumulative_artist_score(
         columns,
     )
     ranking_score = sum(
-        RANK_VALUE.get(classification, 0.0) * _c_score_project_value(track_durations)
+        RANK_VALUE.get(classification, 0.0)
+        * _c_score_project_value(track_durations)
         for classification, track_durations in rankings
     )
     certifications = read_rows(
@@ -104,7 +106,8 @@ def _c_score_standard_certification_value(
     standard_value: int | float, ranking: str, tracks: Iterable[timedelta]
 ) -> float:
     return abs(
-        standard_value - RANK_VALUE.get(ranking, 0.0) * _c_score_project_value(tracks)
+        standard_value
+        - RANK_VALUE.get(ranking, 0.0) * _c_score_project_value(tracks)
     )
 
 
